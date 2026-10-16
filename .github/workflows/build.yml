@@ -1,0 +1,62 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Android SDK уже установлен на раннере GitHub (ANDROID_HOME), отдельная установка не нужна
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Версия (счёт с 1.0.0)
+        id: vb
+        run: |
+          f=app/version-base.txt
+          b=$(tr -d ' \r\n\t' < "$f" 2>/dev/null || true)
+          if ! [[ "$b" =~ ^[0-9]+$ ]]; then
+            b=$((GITHUB_RUN_NUMBER - 1))
+            echo "$b" > "$f"
+            echo "changed=1" >> "$GITHUB_OUTPUT"
+          fi
+          echo "VERSION_BASE=$b" >> "$GITHUB_ENV"
+          echo "Версия этой сборки: 1.0.$((GITHUB_RUN_NUMBER - b - 1))"
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sklad-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Запомнить счётчик версии
+        if: steps.vb.outputs.changed == '1'
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/version-base.txt
+          git commit -m "Счётчик версии: база $VERSION_BASE [skip ci]"
+          git push
